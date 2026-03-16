@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Imagen a Texto</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root { --primary: #6366f1; --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+
+        header { background: var(--panel); padding: 10px; border-bottom: 1px solid #334155; text-align: center; flex-shrink: 0; }
+        
+        /* Contenedor principal adaptable */
+        .main-container { display: flex; flex: 1; flex-direction: row; overflow: hidden; }
+
+        /* Estilos para teléfonos (Media Query al final) */
+        .editor-section { flex: 2; display: flex; flex-direction: column; background: #000; position: relative; border-right: 1px solid #334155; }
+        .editor-tools { padding: 10px; background: var(--panel); display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+        .cropper-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+        
+        .results-section { flex: 1; background: var(--panel); display: flex; flex-direction: column; padding: 15px; min-width: 300px; }
+        textarea { flex: 1; background: #0f172a; border: 1px solid #334155; color: #cbd5e1; padding: 12px; border-radius: 8px; resize: none; font-size: 14px; margin-bottom: 10px; }
+
+        .btn { padding: 10px 14px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; font-size: 13px; display: flex; align-items: center; gap: 5px; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-secondary { background: #475569; color: white; }
+
+        #loader { position: absolute; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        .spinner { border: 4px solid rgba(255,255,255,0.1); border-top: 4px solid var(--primary); border-radius: 50%; width: 35px; height: 35px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* AJUSTES PARA TELÉFONOS */
+        @media (max-width: 768px) {
+            .main-container { flex-direction: column; overflow-y: auto; }
+            .editor-section { flex: none; height: 60vh; border-right: none; border-bottom: 1px solid #334155; }
+            .results-section { flex: none; height: auto; min-height: 400px; }
+            textarea { height: 200px; }
+            .btn { font-size: 12px; padding: 8px 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h3 style="margin:0">OCR Studio Mobile Friendly</h3>
+    </header>
+
+    <div class="main-container">
+        <div class="editor-section">
+            <div id="loader">
+                <div class="spinner"></div>
+                <p>Extrayendo...</p>
+            </div>
+
+            <div class="editor-tools">
+                <input type="file" id="fileInput" accept="image/*" style="display:none">
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">Subir</button>
+                <button class="btn btn-success" id="btnProcess">Procesar</button>
+                <button class="btn btn-danger" id="btnDeleteImg">Borrar Foto</button>
+            </div>
+
+            <div class="cropper-wrapper">
+                <img id="mainImage" style="max-width: 100%; display: block;">
+            </div>
+        </div>
+
+        <div class="results-section">
+            <h4 style="margin:0 0 10px 0">Texto Extraído</h4>
+            <textarea id="finalText" placeholder="Texto aquí..."></textarea>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <button class="btn btn-secondary" onclick="download('txt')">.TXT</button>
+                <button class="btn btn-secondary" onclick="download('doc')">.DOC</button>
+                <button class="btn btn-danger" onclick="document.getElementById('finalText').value=''" style="grid-column: span 2; justify-content: center;">Limpiar Texto</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let cropper = null;
+        const fileInput = document.getElementById('fileInput');
+        const mainImage = document.getElementById('mainImage');
+        const finalText = document.getElementById('finalText');
+        const loader = document.getElementById('loader');
+
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                if (cropper) cropper.destroy();
+                mainImage.src = event.target.result;
+                cropper = new Cropper(mainImage, {
+                    viewMode: 1,
+                    autoCropArea: 0.8,
+                    responsive: true,
+                    checkOrientation: true // Ayuda con la orientación en móviles
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('btnProcess').addEventListener('click', async () => {
+            if (!cropper) return;
+            loader.style.display = 'flex';
+            try {
+                const canvas = cropper.getCroppedCanvas();
+                const result = await Tesseract.recognize(canvas.toDataURL(), 'spa');
+                finalText.value += result.data.text.trim() + "\n\n";
+                finalText.scrollTop = finalText.scrollHeight;
+            } catch (err) {
+                alert("Error");
+            } finally {
+                loader.style.display = 'none';
+            }
+        });
+
+        document.getElementById('btnDeleteImg').addEventListener('click', () => {
+            if (cropper) { cropper.destroy(); cropper = null; }
+            mainImage.src = '';
+            fileInput.value = '';
+        });
+
+        function download(ext) {
+            const content = finalText.value;
+            if (!content) return;
+            const blob = ext === 'txt' 
+                ? new Blob([content], {type:'text/plain'})
+                : new Blob([`<html><body>${content.replace(/\n/g,'<br>')}</body></html>`], {type:'application/msword'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `OCR.${ext}`;
+            a.click();
+        }
+    </script>
+</body>
+</html>
